@@ -1,0 +1,173 @@
+
+Let's take the example of these two model to understand how model works.
+
+model User {
+  id String @id @default(cuid())
+  clerkUserId String @unique
+  email String @unique
+  name String
+  imageUrl String?    // img is optional
+  role String?
+  articles Articles[]  // user can create multiple articles
+}
+
+
+model Articles {
+  id String @id @default(cuid())
+  title String
+  content String
+  category String
+  featuredImage String
+  authorId String  // foreign key
+  author User @relation(fields: [authorId], references: [id]) // relation to User model
+  createdAt DateTime @default(now())
+}
+
+
+Let's create User table and Articles table based on above model/schema to understand all concepts
+
+User Table:
+| id      | clerkUserId | email                                         | name      | imageUrl | role   |
+| ------- | ----------- | --------------------------------------------- | --------- | -------- | ------ |
+| usr_123 | ck_abc123   | [john@example.com](mailto:john@example.com)   | John Doe  | john.png | author |
+| usr_456 | ck_def456   | [alice@example.com](mailto:alice@example.com) | Alice Lee | NULL     | editor |
+
+
+Articles Table:
+| id      | title                | content          | category | featuredImage | authorId |
+| ------- | -------------------- | ---------------- | -------- | ------------- | -------- |
+| art_111 | Intro to Prisma      | Prisma basics... | Database | prisma.png    | usr_123  |
+| art_112 | React Best Practices | React tips...    | Frontend | react.png     | usr_123  |
+| art_113 | Node.js Security     | Secure Node...   | Backend  | node.png      | usr_456  |
+
+
+Q 1. At the above Articles table there is no 'author' column. Why ?
+
+To answer this question, we need to understand why we need 'authorId' and 'author'
+
+authorId:
+
+- This is the actual database column in the Articles table.
+- It stores the User.id of whoever wrote the article.
+- Example: If John’s user id = usr_123, then Articles.authorId = "usr_123"
+
+author:
+
+- This (author) is not a column in the database.
+- It’s a Prisma relation field that acts as a shortcut to fetch the full 'User' object.
+- When you query with Prisma and include: { author: true }, Prisma automatically looks at 'authorId', 
+finds the corresponding 'User', and attaches it under the 'author' field.
+
+
+Code:
+const article = await prisma.articles.findUnique({
+  where: { id: "art_111" },
+  include: { author: true },
+});
+
+
+Output:
+{
+  "id": "art_111",
+  "title": "Intor to Prisma",
+  "content": "Prisma basic...",
+  "category": "Database",
+  "featuredImage": "prisma.png",
+  "authorId": "usr_123",
+  "author": {
+    "id": "usr_123",
+    "clerkUserId": "ck_abc123",
+    "email": "[john@example.com](mailto:john@example.com)",
+    "name": "John Doe",
+    "imageUrl": "john.png",
+    "role": "author"
+  }
+}
+
+
+
+:) Another follow up question, what if I don't need corresponding User or I don't need user info at all like above then how 
+   should my Articles modle/schema will look like ?
+
+   model Articles {
+        id            String   @id @default(cuid())
+        title         String
+        content       String
+        category      String
+        featuredImage String
+        authorId      String   // just a plain column now
+        createdAt     DateTime @default(now())
+}
+
+What changes here?
+
+- authorId is just a string field (Prisma won’t enforce it as a foreign key).
+- There is no relation to the User model, so you can’t do include: { author: true }.
+- You’ll have to manage everything yourself:
+    - Insert an article with the correct authorId manually.
+    - If you want the user details, you’ll have to query User separately using authorId.
+
+
+Pros & Cons
+
+✅ Pros
+
+- Simpler schema.
+- Useful if you never need to fetch user info along with articles.
+
+❌ Cons
+
+- Prisma won’t enforce referential integrity (nothing stops you from saving an authorId that doesn’t exist in User).
+- You lose the convenience of Prisma relations (include, nested queries, cascades, etc.).
+
+---------------------xxxxx----------------------
+
+Q 2. What is 'articles Articles[]' field in User model 'cause there is no 'articles' column in User table ?
+
+Why don’t you see an 'articles' column in the User table? Because there’s no need for one.
+The User → Articles relation is implemented by checking all rows in Articles where "authorId = User.id".
+
+Suppose you have this data:
+
+User table:
+| id      | name     | email                                         |
+| ------- | -------- | --------------------------------------------- |
+| usr_123 | John Doe | [john@example.com](mailto:john@example.com)   |
+| usr_456 | Alice    | [alice@example.com](mailto:alice@example.com) |
+
+
+Articles table:
+| id      | title            | authorId |
+| ------- | ---------------- | -------- |
+| art_001 | Prisma Basics    | usr_123  |
+| art_002 | React Tips       | usr_123  |
+| art_003 | Node.js Security | usr_456  |
+
+
+If we did this:
+const user = await prisma.user.findUnique({
+  where: { id: "usr_123" },
+  include: { articles: true }
+});
+
+The output will be:
+{
+  "id": "usr_123",
+  "name": "John Doe",
+  "email": "john@example.com",
+  "articles": [
+    {
+      "id": "art_001",
+      "title": "Prisma Basics",
+      "authorId": "usr_123",
+    },
+    {
+      "id": "art_002",
+      "title": "React Tips",
+      "authorId": "usr_123",
+    }
+  ]
+}
+
+
+
